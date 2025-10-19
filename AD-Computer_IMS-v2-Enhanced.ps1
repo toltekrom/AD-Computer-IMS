@@ -1,4 +1,4 @@
-#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.DeviceManagement, Microsoft.Graph.Identity.DirectoryManagement
+# Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.DeviceManagement, Microsoft.Graph.Identity.DirectoryManagement
 
 param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot "config\appsettings.json"),
