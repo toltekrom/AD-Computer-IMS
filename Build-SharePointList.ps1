@@ -1,8 +1,8 @@
-#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Sites, ImportExcel
+#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Sites
 
 param(
-    [string]$ConfigPath = "E:\Users\jerom\source\AD-Computer-IMS\config\appsettings.json",
-    [string]$ExcelFilePath = "E:\Users\jerom\source\AzureAD_UserAudit2.xlsx",
+    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config\appsettings.json'),
+    [string]$InputFilePath = $null, # Accept CSV or Excel file. If omitted, will pick most recent CSV from ./output
     [string]$SharePointSiteUrl = "https://pcwabuckhorn.sharepoint.com/sites/SecOps",
     [string]$ListName = "Devices",
     [switch]$AnalyzeOnly,
@@ -16,47 +16,60 @@ $clientId = $config.Authentication.ClientId
 $tenantId = $config.Authentication.TenantId
 $thumbprint = $config.Authentication.CertificateThumbprint
 
-function Test-ExcelFile {
+function Test-InputFile {
     param([string]$FilePath)
-    
-    Write-Host "`n=== ANALYZING EXCEL FILE ===" -ForegroundColor Cyan
+
+    Write-Host "`n=== ANALYZING INPUT FILE ===" -ForegroundColor Cyan
     Write-Host "File Path: $FilePath" -ForegroundColor Gray
-    
+
     if (-not (Test-Path $FilePath)) {
-        Write-Host "❌ Excel file not found!" -ForegroundColor Red
+        Write-Host "❌ Input file not found!" -ForegroundColor Red
         return $null
     }
-    
+
     try {
-        # Import Excel data to analyze structure
-        $excelData = Import-Excel -Path $FilePath -WorksheetName 1
-        
-        Write-Host "✅ Excel file loaded successfully!" -ForegroundColor Green
-        Write-Host "   Total Rows: $($excelData.Count)" -ForegroundColor White
-        
+        $ext = [IO.Path]::GetExtension($FilePath).ToLower()
+        if ($ext -eq '.csv') {
+            Write-Host "Detected CSV input. Importing via Import-Csv" -ForegroundColor Gray
+            $data = Import-Csv -Path $FilePath
+        } else {
+            # Try to use Import-Excel if available
+            if (Get-Module -ListAvailable -Name ImportExcel) {
+                Write-Host "Detected Excel input. Importing via Import-Excel" -ForegroundColor Gray
+                $data = Import-Excel -Path $FilePath -WorksheetName 1
+            } else {
+                Write-Host "❌ Excel file provided but ImportExcel module not available. Install-Module ImportExcel or provide a CSV." -ForegroundColor Red
+                return $null
+            }
+        }
+
+        Write-Host "✅ File loaded successfully!" -ForegroundColor Green
+        Write-Host "   Total Rows: $($data.Count)" -ForegroundColor White
+
         # Get column names
-        $columns = $excelData[0].PSObject.Properties.Name
+        $columns = @()
+        if ($data.Count -gt 0) { $columns = $data[0].PSObject.Properties.Name }
         Write-Host "   Columns Found: $($columns.Count)" -ForegroundColor White
-        
+
         Write-Host "`n📋 COLUMN STRUCTURE:" -ForegroundColor Yellow
         foreach ($column in $columns) {
-            $sampleValue = $excelData[0].$column
+            $sampleValue = $data[0].$column
             $dataType = if ($sampleValue -match '^\d{4}-\d{2}-\d{2}') { 'DateTime' } 
                        elseif ($sampleValue -match '^\d+$') { 'Number' }
                        elseif ($sampleValue -match '^(true|false)$') { 'Boolean' }
                        else { 'Text' }
-            
+
             Write-Host "   • $column ($dataType): $sampleValue" -ForegroundColor Gray
         }
-        
+
         return @{
-            Data = $excelData
+            Data = $data
             Columns = $columns
-            RowCount = $excelData.Count
+            RowCount = $data.Count
         }
-        
+
     } catch {
-        Write-Host "❌ Error reading Excel file: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "❌ Error reading input file: $($_.Exception.Message)" -ForegroundColor Red
         return $null
     }
 }
@@ -212,8 +225,20 @@ try {
     Connect-MgGraph -ClientId $clientId -TenantId $tenantId -CertificateThumbprint $thumbprint -NoWelcome
     Write-Host "Successfully connected to Microsoft Graph" -ForegroundColor Green
     
-    # Step 1: Analyze Excel file
-    $excelAnalysis = Test-ExcelFile -FilePath $ExcelFilePath
+    # Step 1: Determine input file (CSV or Excel)
+    if (-not $InputFilePath) {
+        Write-Host "No input file provided. Searching ./output for most recent CSV..." -ForegroundColor Yellow
+        $latest = Get-ChildItem -Path (Join-Path $PSScriptRoot 'output') -File -Filter '*.csv' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($latest) {
+            $InputFilePath = $latest.FullName
+            Write-Host "Using latest CSV: $InputFilePath" -ForegroundColor Green
+        } else {
+            Write-Host "No CSV files found in ./output. Provide -InputFilePath to specify a CSV or Excel file." -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    $excelAnalysis = Test-InputFile -FilePath $InputFilePath
     
     if (-not $excelAnalysis) {
         Write-Host "❌ Cannot proceed without valid Excel file" -ForegroundColor Red

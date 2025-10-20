@@ -25,6 +25,11 @@ AD-Computer-IMS
 └── README.md                         # Documentation for the project
 ```
 
+## Scripts
+
+See `scripts/README.md` for details about helper scripts (dependency installer, certificate helpers, deployment helpers).
+
+
 ## Setup Instructions
 1. **Clone the Repository**: Clone this repository to your local machine.
 2. **Configure App Registration**: Update the `src/config/appsettings.json` file with your Microsoft Graph app registration credentials (client ID, tenant ID, client secret).
